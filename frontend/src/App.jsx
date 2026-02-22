@@ -261,7 +261,7 @@ function GenerateMode({ sessions, setSessions, activeId, setActiveId }) {
   }
 
   const sendMessage = async () => {
-    if (!input.trim() || isThinking || session?.phase !== 'chat') return
+    if (!input.trim() || isThinking || session?.phase === 'generating') return
     const userText = input.trim()
     setInput('')
 
@@ -270,6 +270,28 @@ function GenerateMode({ sessions, setSessions, activeId, setActiveId }) {
     updateSession({ chatHistory: newChatHistory, apiHistory: newApiHistory })
     setIsThinking(true)
 
+    // phase === 'done' → update existing infrastructure
+    if (session.phase === 'done') {
+      try {
+        const res = await fetch('/api/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request: userText, currentTerraform: session.terraform })
+        })
+        const { terraform } = await res.json()
+        const reply = '✅ Infrastructure updated! Check the .tf Files tab.'
+        const updatedChat = [...newChatHistory, { role: 'assistant', content: reply }]
+        const updatedApi  = [...newApiHistory,  { role: 'assistant', content: reply }]
+        updateSession({ chatHistory: updatedChat, apiHistory: updatedApi, terraform })
+        setIsThinking(false)
+      } catch (err) {
+        console.error(err)
+        setIsThinking(false)
+      }
+      return
+    }
+
+    // phase === 'chat' → normal clarify flow
     try {
       const res = await fetch('/api/clarify', {
         method: 'POST',
@@ -432,9 +454,9 @@ function GenerateMode({ sessions, setSessions, activeId, setActiveId }) {
                 session?.phase === 'chat'
                   ? session?.chatHistory.length === 0 ? 'Describe your infrastructure...' : 'Answer above...'
                   : session?.phase === 'generating' ? 'Agents running...'
-                  : 'Done! Start a new session ↑'
+                  : 'Ask to update infrastructure e.g. "add Redis"'
               }
-              disabled={session?.phase !== 'chat' || isThinking}
+              disabled={session?.phase === 'generating' || isThinking}
               style={{
                 flex: 1, background: 'var(--bg3)', border: '1px solid var(--border)',
                 borderRadius: 8, padding: '10px 14px', color: 'var(--text)',
@@ -445,18 +467,21 @@ function GenerateMode({ sessions, setSessions, activeId, setActiveId }) {
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
               autoFocus
             />
-            <button onClick={sendMessage} disabled={session?.phase !== 'chat' || isThinking || !input.trim()} style={{
+            <button onClick={sendMessage} disabled={session?.phase === 'generating' || isThinking || !input.trim()} style={{
               padding: '10px 16px',
-              background: session?.phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
-              border: `1px solid ${session?.phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
+              background: session?.phase !== 'generating' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
+              border: `1px solid ${session?.phase !== 'generating' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
               borderRadius: 8,
-              color: session?.phase === 'chat' && input.trim() ? '#000' : 'var(--text3)',
-              cursor: session?.phase === 'chat' && input.trim() ? 'pointer' : 'not-allowed',
+              color: session?.phase !== 'generating' && input.trim() ? '#000' : 'var(--text3)',
+              cursor: session?.phase !== 'generating' && input.trim() ? 'pointer' : 'not-allowed',
               fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, transition: 'all 0.15s'
             }}>›</button>
           </div>
           <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)' }}>
-            Enter to send · Agent 0 asks questions if needed
+            {session?.phase === 'done'
+              ? 'Ask to update your .tf files · e.g. "add Redis", "remove S3"'
+              : 'Enter to send · Agent 0 asks questions if needed'
+            }
           </div>
         </div>
       </div>

@@ -196,5 +196,28 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
+// ── Route 4: Update infrastructure (Agent 1 only) ─────────────────────────
+app.post('/api/update', async (req, res) => {
+  const { request, currentTerraform } = req.body
+  if (!request || !currentTerraform) return res.status(400).json({ error: 'request and currentTerraform are required' })
+
+  try {
+    const updatedTerraform = await runAgent(
+      SKILL_GENERATE,
+      `You are updating existing OpenTofu infrastructure. Here are the current .tf files:
+
+${currentTerraform}
+
+User request: ${request}
+
+Apply the requested changes and return the complete updated .tf files.`
+    )
+    res.json({ terraform: updatedTerraform })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => console.log(`🚀 DeployMate backend running on http://localhost:${PORT}`))
