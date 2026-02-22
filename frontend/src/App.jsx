@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import JSZip from 'jszip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -55,20 +56,45 @@ function ResultPanel({ terraform, review, cost, pipeline }) {
 
   const content = { terraform, review, cost, pipeline }[tab]
 
+  const downloadZip = async () => {
+    const zip = new JSZip()
+    if (terraform) zip.file('main.tf',             terraform)
+    if (review)    zip.file('security-review.md',  review)
+    if (cost)      zip.file('cost-estimate.md',    cost)
+    if (pipeline)  zip.file('.gitlab-ci.yml',      pipeline)
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = 'deploymate-infra.zip'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => t.available && setTab(t.id)} style={{
-            padding: '10px 16px', fontFamily: 'var(--font-mono)', fontSize: 11,
-            background: tab === t.id ? 'var(--bg3)' : 'transparent',
-            border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-            color: !t.available ? 'var(--text3)' : tab === t.id ? 'var(--accent)' : 'var(--text2)',
-            cursor: t.available ? 'pointer' : 'default', transition: 'all 0.15s', marginBottom: -1
-          }}>
-            {t.label}{!t.available && <span style={{ marginLeft: 4, opacity: 0.4 }}>···</span>}
-          </button>
-        ))}
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', flex: 1 }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => t.available && setTab(t.id)} style={{
+              padding: '10px 16px', fontFamily: 'var(--font-mono)', fontSize: 11,
+              background: tab === t.id ? 'var(--bg3)' : 'transparent',
+              border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              color: !t.available ? 'var(--text3)' : tab === t.id ? 'var(--accent)' : 'var(--text2)',
+              cursor: t.available ? 'pointer' : 'default', transition: 'all 0.15s', marginBottom: -1
+            }}>
+              {t.label}{!t.available && <span style={{ marginLeft: 4, opacity: 0.4 }}>···</span>}
+            </button>
+          ))}
+        </div>
+        {(terraform || pipeline) && (
+          <button onClick={downloadZip} style={{
+            margin: '0 12px', padding: '5px 12px',
+            background: 'var(--accent)', border: 'none', borderRadius: 6,
+            color: '#000', cursor: 'pointer', flexShrink: 0,
+            fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, letterSpacing: 1
+          }}>⬇ ZIP</button>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         {content
