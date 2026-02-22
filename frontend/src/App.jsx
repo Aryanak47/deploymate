@@ -236,9 +236,7 @@ const newSession = () => ({
 const _initial = newSession() // one shared instance for initial state
 
 // ── Generate Mode ─────────────────────────────────────────────────────────────
-function GenerateMode() {
-  const [sessions,  setSessions]  = useState([_initial])
-  const [activeId,  setActiveId]  = useState(_initial.id)
+function GenerateMode({ sessions, setSessions, activeId, setActiveId }) {
   const [input,      setInput]      = useState('')
   const [isThinking, setIsThinking] = useState(false)
 
@@ -620,6 +618,8 @@ function ReviewMode() {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [mode, setMode] = useState('generate')
+  const [sessions,  setSessions]  = useState([_initial])
+  const [activeId,  setActiveId]  = useState(_initial.id)
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -664,7 +664,9 @@ export default function App() {
       </header>
 
       <div style={{ flex: 1, overflow: 'hidden', padding: 20 }}>
-        {mode === 'generate' ? <GenerateMode /> : <ReviewMode />}
+        {mode === 'generate'
+          ? <GenerateMode sessions={sessions} setSessions={setSessions} activeId={activeId} setActiveId={setActiveId} />
+          : <ReviewMode />}
       </div>
     </div>
   )
