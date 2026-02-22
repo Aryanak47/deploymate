@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
@@ -40,7 +41,7 @@ function StepIndicator({ steps }) {
 }
 
 // ── Result Tabs ───────────────────────────────────────────────────────────────
-function ResultPanel({ terraform, review, pipeline }) {
+function ResultPanel({ terraform, review, cost, pipeline }) {
   const [tab, setTab] = useState(null)
   useEffect(() => { if (terraform && !tab) setTab('terraform') }, [terraform])
   useEffect(() => { if (pipeline) setTab('pipeline') }, [pipeline])
@@ -48,23 +49,24 @@ function ResultPanel({ terraform, review, pipeline }) {
   const tabs = [
     { id: 'terraform', label: '📁 .tf Files',       available: !!terraform },
     { id: 'review',    label: '🔍 Security Review', available: !!review    },
+    { id: 'cost',      label: '💰 Cost Estimate',   available: !!cost      },
     { id: 'pipeline',  label: '🚀 GitLab Pipeline', available: !!pipeline  },
   ]
 
-  const content = { terraform, review, pipeline }[tab]
+  const content = { terraform, review, cost, pipeline }[tab]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => t.available && setTab(t.id)} style={{
-            padding: '10px 18px', fontFamily: 'var(--font-mono)', fontSize: 12,
+            padding: '10px 16px', fontFamily: 'var(--font-mono)', fontSize: 11,
             background: tab === t.id ? 'var(--bg3)' : 'transparent',
             border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
             color: !t.available ? 'var(--text3)' : tab === t.id ? 'var(--accent)' : 'var(--text2)',
             cursor: t.available ? 'pointer' : 'default', transition: 'all 0.15s', marginBottom: -1
           }}>
-            {t.label}{!t.available && <span style={{ marginLeft: 6, opacity: 0.4 }}>···</span>}
+            {t.label}{!t.available && <span style={{ marginLeft: 4, opacity: 0.4 }}>···</span>}
           </button>
         ))}
       </div>
@@ -89,7 +91,7 @@ function MarkdownContent({ content }) {
 
   return (
     <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-      <ReactMarkdown components={{
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
         code({ node, inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')
           const code = String(children).replace(/\n$/, '')
@@ -120,6 +122,20 @@ function MarkdownContent({ content }) {
           }
           return <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg3)', padding: '1px 5px', borderRadius: 3, fontSize: '0.9em' }} {...props}>{children}</code>
         },
+        table: ({ children }) => (
+          <div style={{ overflowX: 'auto', margin: '16px 0', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+              {children}
+            </table>
+          </div>
+        ),
+        thead: ({ children }) => <thead style={{ background: 'var(--bg3)' }}>{children}</thead>,
+        th: ({ children }) => <th style={{ padding: '10px 16px', textAlign: 'left', color: 'var(--accent)', fontWeight: 700, letterSpacing: 1, fontSize: 11, whiteSpace: 'nowrap', borderBottom: '2px solid var(--border)' }}>{children}</th>,
+        td: ({ children }) => <td style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text2)', whiteSpace: 'nowrap' }}>{children}</td>,
+        tr: ({ children, node }) => {
+          const isLast = !node?.position
+          return <tr style={{ transition: 'background 0.1s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,255,136,0.03)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{children}</tr>
+        },
         h2: ({ children }) => <h2 style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 13, letterSpacing: 2, marginTop: 24, marginBottom: 12, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>{children}</h2>,
         h3: ({ children }) => <h3 style={{ color: 'var(--text)', fontSize: 13, marginTop: 16, marginBottom: 8 }}>{children}</h3>,
         p: ({ children }) => <p style={{ color: 'var(--text2)', marginBottom: 10 }}>{children}</p>,
@@ -144,7 +160,6 @@ function ChatMessage({ role, content, isTyping }) {
       animation: 'fadeUp 0.3s ease both',
       flexDirection: role === 'user' ? 'row-reverse' : 'row'
     }}>
-      {/* Avatar */}
       <div style={{
         width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -155,8 +170,6 @@ function ChatMessage({ role, content, isTyping }) {
       }}>
         {role === 'user' ? 'U' : '⚙'}
       </div>
-
-      {/* Bubble */}
       <div style={{
         flex: 1, padding: '12px 16px',
         background: role === 'user' ? 'rgba(0,136,255,0.08)' : 'var(--bg2)',
@@ -173,38 +186,95 @@ function ChatMessage({ role, content, isTyping }) {
   )
 }
 
-// ── Generate Mode — Clarification Chat + Flow ────────────────────────────────
-function GenerateMode() {
-  // Chat state
-  const [chatHistory,   setChatHistory]   = useState([])  // [{role, content}]
-  const [apiHistory,    setApiHistory]    = useState([])  // same but for API calls
-  const [input,         setInput]         = useState('')
-  const [isThinking,    setIsThinking]    = useState(false)
-  const [phase,         setPhase]         = useState('chat') // 'chat' | 'generating' | 'done'
+// ── localStorage helpers ─────────────────────────────────────────────────────
+const SESSION_KEY = 'deploymate_session'
 
-  // Generate flow state
+const saveSession = (data) => {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }))
+  } catch (e) { console.warn('localStorage save failed:', e) }
+}
+
+const loadSession = () => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch (e) { return null }
+}
+
+const clearSession = () => {
+  try { localStorage.removeItem(SESSION_KEY) } catch (e) {}
+}
+
+// ── Generate Mode ─────────────────────────────────────────────────────────────
+function GenerateMode() {
+  const [chatHistory,  setChatHistory]  = useState([])
+  const [apiHistory,   setApiHistory]   = useState([])
+  const [snapshot,     setSnapshot]     = useState(null)
+  const [input,        setInput]        = useState('')
+  const [isThinking,   setIsThinking]   = useState(false)
+  const [phase,        setPhase]        = useState('chat')
+  const [restored,     setRestored]     = useState(false)
+
   const [steps, setSteps] = useState([
     { label: 'Generate .tf infrastructure files', status: 'waiting' },
     { label: 'Review for security issues',        status: 'waiting' },
+    { label: 'Estimate monthly costs',            status: 'waiting' },
     { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
   ])
+
   const [terraform, setTerraform] = useState(null)
   const [review,    setReview]    = useState(null)
+  const [cost,      setCost]      = useState(null)
   const [pipeline,  setPipeline]  = useState(null)
 
-  const chatEndRef  = useRef(null)
-  const inputRef    = useRef(null)
+  const chatEndRef = useRef(null)
+  const inputRef   = useRef(null)
+
+  // ── Restore session on mount ────────────────────────────────────────────────
+  useEffect(() => {
+    const saved = loadSession()
+    if (saved?.chatHistory?.length) {
+      setChatHistory(saved.chatHistory)
+      setApiHistory(saved.apiHistory || [])
+      setSnapshot(saved.snapshot || null)
+      setTerraform(saved.terraform || null)
+      setReview(saved.review || null)
+      setCost(saved.cost || null)
+      setPipeline(saved.pipeline || null)
+      setPhase(saved.phase || 'chat')
+      setRestored(true)
+    }
+  }, [])
+
+  // ── Auto-save whenever state changes ───────────────────────────────────────
+  useEffect(() => {
+    if (chatHistory.length > 0) {
+      saveSession({ chatHistory, apiHistory, snapshot, terraform, review, cost, pipeline, phase })
+    }
+  }, [chatHistory, terraform, review, cost, pipeline, phase, snapshot])
+
+  // ── Create snapshot every 8 turns to compress history ──────────────────────
+  const maybeCreateSnapshot = async (history) => {
+    if (history.length === 0 || history.length % 8 !== 0) return
+    try {
+      const res = await fetch('/api/snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history })
+      })
+      const { snapshot: newSnap } = await res.json()
+      setSnapshot(newSnap)
+    } catch (e) { console.warn('Snapshot silently failed:', e) }
+  }
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatHistory, isThinking])
 
-  // ── Send message to clarifier ───────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || isThinking || phase !== 'chat') return
-
     const userText = input.trim()
     setInput('')
 
-    // Add user message to chat
     const newChatHistory = [...chatHistory, { role: 'user', content: userText }]
     const newApiHistory  = [...apiHistory,  { role: 'user', content: userText }]
     setChatHistory(newChatHistory)
@@ -215,34 +285,32 @@ function GenerateMode() {
       const res = await fetch('/api/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, history: apiHistory })
+        body: JSON.stringify({ message: userText, history: apiHistory, snapshot })
       })
       const { reply, isReady } = await res.json()
-
-      // Add agent reply to chat
-      setChatHistory([...newChatHistory, { role: 'assistant', content: reply }])
-      setApiHistory([...newApiHistory,   { role: 'assistant', content: reply }])
+      const updatedChat = [...newChatHistory, { role: 'assistant', content: reply }]
+      const updatedApi  = [...newApiHistory,  { role: 'assistant', content: reply }]
+      setChatHistory(updatedChat)
+      setApiHistory(updatedApi)
       setIsThinking(false)
-
-      // If agent has enough info → trigger generate flow
-      if (isReady) {
-        setTimeout(() => runGenerateFlow(reply), 800)
-      }
+      // Every 8 turns, compress history into a snapshot
+      maybeCreateSnapshot(updatedApi)
+      if (isReady) setTimeout(() => runGenerateFlow(reply), 800)
     } catch (err) {
       console.error(err)
       setIsThinking(false)
     }
   }
 
-  // ── Run 3-agent flow ────────────────────────────────────────────────────
   const runGenerateFlow = async (summary) => {
     setPhase('generating')
     setSteps([
       { label: 'Generate .tf infrastructure files', status: 'waiting' },
       { label: 'Review for security issues',        status: 'waiting' },
+      { label: 'Estimate monthly costs',            status: 'waiting' },
       { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
     ])
-    setTerraform(null); setReview(null); setPipeline(null)
+    setTerraform(null); setReview(null); setCost(null); setPipeline(null)
 
     const es = new EventSource(`/api/generate-flow?description=${encodeURIComponent(summary)}`)
 
@@ -254,26 +322,23 @@ function GenerateMode() {
       const { type, content } = JSON.parse(e.data)
       if (type === 'terraform') setTerraform(content)
       if (type === 'review')    setReview(content)
+      if (type === 'cost')      setCost(content)
       if (type === 'pipeline')  setPipeline(content)
     })
-    es.addEventListener('done', () => {
-      setPhase('done')
-      es.close()
-    })
-    es.addEventListener('error', () => {
-      setPhase('chat')
-      es.close()
-    })
+    es.addEventListener('done', () => { setPhase('done'); es.close() })
+    es.addEventListener('error', () => { setPhase('chat'); es.close() })
   }
 
-  // ── Reset ───────────────────────────────────────────────────────────────
   const reset = () => {
+    clearSession()
     setChatHistory([]); setApiHistory([])
+    setSnapshot(null); setRestored(false)
     setInput(''); setPhase('chat')
-    setTerraform(null); setReview(null); setPipeline(null)
+    setTerraform(null); setReview(null); setCost(null); setPipeline(null)
     setSteps([
       { label: 'Generate .tf infrastructure files', status: 'waiting' },
       { label: 'Review for security issues',        status: 'waiting' },
+      { label: 'Estimate monthly costs',            status: 'waiting' },
       { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
     ])
     setTimeout(() => inputRef.current?.focus(), 100)
@@ -285,63 +350,68 @@ function GenerateMode() {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', gap: 16, height: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 16, height: '100%' }}>
 
-      {/* ── Left: Chat panel ── */}
+      {/* Left: Chat */}
       <div style={panelStyle}>
-
-        {/* Header */}
         <div style={{
           padding: '12px 20px', borderBottom: '1px solid var(--border)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
         }}>
-          <div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)', letterSpacing: 2 }}>
-              {phase === 'chat' ? 'AGENT 0 · CLARIFIER' : phase === 'generating' ? 'RUNNING AGENTS...' : 'COMPLETE'}
-            </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)', letterSpacing: 2 }}>
+            {phase === 'chat' ? 'AGENT 0 · CLARIFIER' : phase === 'generating' ? 'RUNNING AGENTS...' : 'COMPLETE ✓'}
+            {snapshot && <span style={{ marginLeft: 8, color: 'var(--accent2)', fontSize: 9, letterSpacing: 1 }}>· 📸 SNAPSHOT</span>}
           </div>
           {(chatHistory.length > 0 || phase === 'done') && (
             <button onClick={reset} style={{
               background: 'none', border: '1px solid var(--border)', borderRadius: 6,
               color: 'var(--text3)', padding: '4px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1,
-              transition: 'all 0.15s'
+              fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1, transition: 'all 0.15s'
             }}
             onMouseEnter={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text3)' }}
-            >
+            onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text3)' }}>
               ↺ NEW
             </button>
           )}
         </div>
 
-        {/* Messages */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {chatHistory.length === 0 && (
+          {/* Restored session banner */}
+          {restored && chatHistory.length > 0 && (
             <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text3)',
-              textAlign: 'center'
+              padding: '8px 12px', marginBottom: 12,
+              background: 'rgba(0,136,255,0.08)', border: '1px solid rgba(0,136,255,0.2)',
+              borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent2)' }}>
+                ⚡ Session restored
+                {snapshot?.estimated_cost && ` · ${snapshot.estimated_cost}`}
+                {snapshot?.cloud && ` · ${snapshot.cloud}`}
+              </span>
+              <button onClick={() => setRestored(false)} style={{
+                background: 'none', border: 'none', color: 'var(--text3)',
+                cursor: 'pointer', fontSize: 12, padding: '0 4px'
+              }}>✕</button>
+            </div>
+          )}
+
+          {chatHistory.length === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text3)', textAlign: 'center' }}>
               <div style={{ fontSize: 36, opacity: 0.4 }}>💬</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 2 }}>
                 Describe what you want to deploy<br />
                 <span style={{ fontSize: 11, opacity: 0.6 }}>
                   "deploy a node.js app"<br />
-                  "I need a postgres database on AWS"<br />
-                  "setup a GCP kubernetes cluster"
+                  "postgres database on AWS"<br />
+                  "kubernetes cluster on GCP"
                 </span>
               </div>
             </div>
           )}
 
-          {chatHistory.map((msg, i) => (
-            <ChatMessage key={i} role={msg.role} content={msg.content} />
-          ))}
-
+          {chatHistory.map((msg, i) => <ChatMessage key={i} role={msg.role} content={msg.content} />)}
           {isThinking && <ChatMessage role="assistant" content="" isTyping />}
 
-          {/* Step indicators appear in chat when generating */}
           {phase === 'generating' && (
             <div style={{ marginTop: 8 }}>
               <StepIndicator steps={steps} />
@@ -349,12 +419,9 @@ function GenerateMode() {
           )}
 
           {phase === 'done' && (
-            <div style={{
-              padding: '12px 16px', background: 'rgba(0,255,136,0.05)',
-              border: '1px solid rgba(0,255,136,0.2)', borderRadius: 8, marginTop: 8
-            }}>
+            <div style={{ padding: '12px 16px', background: 'rgba(0,255,136,0.05)', border: '1px solid rgba(0,255,136,0.2)', borderRadius: 8, marginTop: 8 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent)' }}>
-                ✅ All done! Check the results on the right.
+                ✅ All done! Check the results →
               </div>
             </div>
           )}
@@ -362,7 +429,6 @@ function GenerateMode() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input */}
         <div style={{ padding: 12, borderTop: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
@@ -372,67 +438,57 @@ function GenerateMode() {
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder={
                 phase === 'chat'
-                  ? chatHistory.length === 0
-                    ? 'Describe your infrastructure...'
-                    : 'Answer the questions above...'
-                  : phase === 'generating'
-                  ? 'Agents are running...'
+                  ? chatHistory.length === 0 ? 'Describe your infrastructure...' : 'Answer above...'
+                  : phase === 'generating' ? 'Agents running...'
                   : 'Done! Click ↺ NEW to start over'
               }
               disabled={phase !== 'chat' || isThinking}
               style={{
-                flex: 1, background: 'var(--bg3)',
-                border: `1px solid ${phase === 'chat' ? 'var(--border)' : 'var(--border)'}`,
+                flex: 1, background: 'var(--bg3)', border: '1px solid var(--border)',
                 borderRadius: 8, padding: '10px 14px', color: 'var(--text)',
                 fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none',
-                opacity: phase !== 'chat' ? 0.5 : 1,
-                transition: 'border-color 0.15s'
+                opacity: phase !== 'chat' ? 0.5 : 1, transition: 'border-color 0.15s'
               }}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
               autoFocus
             />
-            <button
-              onClick={sendMessage}
-              disabled={phase !== 'chat' || isThinking || !input.trim()}
-              style={{
-                padding: '10px 16px', background: phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
-                border: `1px solid ${phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 8, color: phase === 'chat' && input.trim() ? '#000' : 'var(--text3)',
-                cursor: phase === 'chat' && input.trim() ? 'pointer' : 'not-allowed',
-                fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700,
-                transition: 'all 0.15s'
-              }}
-            >
-              ›
-            </button>
+            <button onClick={sendMessage} disabled={phase !== 'chat' || isThinking || !input.trim()} style={{
+              padding: '10px 16px',
+              background: phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
+              border: `1px solid ${phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 8,
+              color: phase === 'chat' && input.trim() ? '#000' : 'var(--text3)',
+              cursor: phase === 'chat' && input.trim() ? 'pointer' : 'not-allowed',
+              fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, transition: 'all 0.15s'
+            }}>›</button>
           </div>
           <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)' }}>
-            Enter to send · Agent 0 will ask questions if needed
+            Enter to send · Agent 0 asks questions if needed
           </div>
         </div>
       </div>
 
-      {/* ── Right: Results panel ── */}
+      {/* Right: Results */}
       <div style={panelStyle}>
-        {terraform || review || pipeline
-          ? <ResultPanel terraform={terraform} review={review} pipeline={pipeline} />
+        {terraform || review || cost || pipeline
+          ? <ResultPanel terraform={terraform} review={review} cost={cost} pipeline={pipeline} />
           : (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: 'var(--text3)' }}>
               <div style={{ fontSize: 48, opacity: 0.2 }}>🏗️</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'center', lineHeight: 2.2 }}>
-                Results will appear here<br />
+                Results appear here after agents run<br />
                 <span style={{ fontSize: 11, opacity: 0.6 }}>
-                  After clarification → 3 agents run automatically<br />
-                  📁 .tf Files &nbsp;·&nbsp; 🔍 Security Review &nbsp;·&nbsp; 🚀 Pipeline
+                  📁 .tf Files · 🔍 Security · 💰 Cost · 🚀 Pipeline
                 </span>
               </div>
-              <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
                 {[
-                  { icon: '🤖', label: 'Agent 0', desc: 'Clarifies' },
-                  { icon: '⚙️', label: 'Agent 1', desc: 'Generates' },
-                  { icon: '🔍', label: 'Agent 2', desc: 'Reviews' },
-                  { icon: '🚀', label: 'Agent 3', desc: 'Pipelines' },
+                  { icon: '🤖', label: 'Agent 0', desc: 'Clarifies'  },
+                  { icon: '⚙️', label: 'Agent 1', desc: 'Generates'  },
+                  { icon: '🔍', label: 'Agent 2', desc: 'Reviews'    },
+                  { icon: '💰', label: 'Agent 3', desc: 'Costs'      },
+                  { icon: '🚀', label: 'Agent 4', desc: 'Pipelines'  },
                 ].map(item => (
                   <div key={item.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                     <span style={{ fontSize: 20, opacity: 0.4 }}>{item.icon}</span>
@@ -573,8 +629,6 @@ export default function App() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-      {/* Header */}
       <header style={{
         padding: '0 24px', height: 56, display: 'flex', alignItems: 'center',
         justifyContent: 'space-between', borderBottom: '1px solid var(--border)',
@@ -595,10 +649,7 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{
-          display: 'flex', background: 'var(--bg3)',
-          border: '1px solid var(--border)', borderRadius: 8, padding: 3, gap: 2
-        }}>
+        <div style={{ display: 'flex', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: 3, gap: 2 }}>
           {[
             { id: 'generate', label: '⚙️ Generate Flow' },
             { id: 'review',   label: '🔍 Review .tf'   },
@@ -614,11 +665,10 @@ export default function App() {
 
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>
           <span style={{ color: 'var(--accent)', animation: 'pulse-accent 2s ease infinite' }}>●</span>
-          {' '}In development
+          {' '}In Development
         </div>
       </header>
 
-      {/* Body */}
       <div style={{ flex: 1, overflow: 'hidden', padding: 20 }}>
         {mode === 'generate' ? <GenerateMode /> : <ReviewMode />}
       </div>
