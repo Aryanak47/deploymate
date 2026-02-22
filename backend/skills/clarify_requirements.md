@@ -105,7 +105,9 @@ How much traffic are you expecting?
 
 ## After User Answers
 
-Once you have enough information, respond with a structured summary and signal that you're ready:
+Once you have enough information, respond with a structured summary and signal that you're ready.
+
+You MUST include the EXACT phrase "Generating your infrastructure now..." at the end of your summary — this is how the system knows to trigger the next agents. Never skip it, never rephrase it.
 
 ---
 
@@ -121,7 +123,7 @@ Once you have enough information, respond with a structured summary and signal t
 
 ---
 
-This summary is important — it shows the user exactly what will be built and the estimated cost BEFORE generating anything.
+The phrase "Generating your infrastructure now..." MUST appear exactly as shown. Do not change it. Do not skip it. The system depends on it to trigger the next step.
 
 ## Cost Estimation Guidelines
 

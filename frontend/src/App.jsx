@@ -179,42 +179,22 @@ function ChatMessage({ role, content, isTyping }) {
       }}>
         {isTyping
           ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)', animation: 'pulse-accent 1s ease infinite' }}>◌ thinking...</span>
-          : <MarkdownContent content={content} />
+          : content
+            ? <MarkdownContent content={content} />
+            : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)' }}>◌ thinking...</span>
         }
       </div>
     </div>
   )
 }
 
-// ── localStorage helpers ─────────────────────────────────────────────────────
-const SESSION_KEY = 'deploymate_session'
-
-const saveSession = (data) => {
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...data, savedAt: new Date().toISOString() }))
-  } catch (e) { console.warn('localStorage save failed:', e) }
-}
-
-const loadSession = () => {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch (e) { return null }
-}
-
-const clearSession = () => {
-  try { localStorage.removeItem(SESSION_KEY) } catch (e) {}
-}
-
 // ── Generate Mode ─────────────────────────────────────────────────────────────
 function GenerateMode() {
   const [chatHistory,  setChatHistory]  = useState([])
   const [apiHistory,   setApiHistory]   = useState([])
-  const [snapshot,     setSnapshot]     = useState(null)
   const [input,        setInput]        = useState('')
   const [isThinking,   setIsThinking]   = useState(false)
   const [phase,        setPhase]        = useState('chat')
-  const [restored,     setRestored]     = useState(false)
 
   const [steps, setSteps] = useState([
     { label: 'Generate .tf infrastructure files', status: 'waiting' },
@@ -230,43 +210,6 @@ function GenerateMode() {
 
   const chatEndRef = useRef(null)
   const inputRef   = useRef(null)
-
-  // ── Restore session on mount ────────────────────────────────────────────────
-  useEffect(() => {
-    const saved = loadSession()
-    if (saved?.chatHistory?.length) {
-      setChatHistory(saved.chatHistory)
-      setApiHistory(saved.apiHistory || [])
-      setSnapshot(saved.snapshot || null)
-      setTerraform(saved.terraform || null)
-      setReview(saved.review || null)
-      setCost(saved.cost || null)
-      setPipeline(saved.pipeline || null)
-      setPhase(saved.phase || 'chat')
-      setRestored(true)
-    }
-  }, [])
-
-  // ── Auto-save whenever state changes ───────────────────────────────────────
-  useEffect(() => {
-    if (chatHistory.length > 0) {
-      saveSession({ chatHistory, apiHistory, snapshot, terraform, review, cost, pipeline, phase })
-    }
-  }, [chatHistory, terraform, review, cost, pipeline, phase, snapshot])
-
-  // ── Create snapshot every 8 turns to compress history ──────────────────────
-  const maybeCreateSnapshot = async (history) => {
-    if (history.length === 0 || history.length % 8 !== 0) return
-    try {
-      const res = await fetch('/api/snapshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history })
-      })
-      const { snapshot: newSnap } = await res.json()
-      setSnapshot(newSnap)
-    } catch (e) { console.warn('Snapshot silently failed:', e) }
-  }
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatHistory, isThinking])
 
@@ -285,16 +228,12 @@ function GenerateMode() {
       const res = await fetch('/api/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, history: apiHistory, snapshot })
+        body: JSON.stringify({ message: userText, history: apiHistory })
       })
       const { reply, isReady } = await res.json()
-      const updatedChat = [...newChatHistory, { role: 'assistant', content: reply }]
-      const updatedApi  = [...newApiHistory,  { role: 'assistant', content: reply }]
-      setChatHistory(updatedChat)
-      setApiHistory(updatedApi)
+      setChatHistory([...newChatHistory, { role: 'assistant', content: reply }])
+      setApiHistory([...newApiHistory,  { role: 'assistant', content: reply }])
       setIsThinking(false)
-      // Every 8 turns, compress history into a snapshot
-      maybeCreateSnapshot(updatedApi)
       if (isReady) setTimeout(() => runGenerateFlow(reply), 800)
     } catch (err) {
       console.error(err)
@@ -330,9 +269,7 @@ function GenerateMode() {
   }
 
   const reset = () => {
-    clearSession()
     setChatHistory([]); setApiHistory([])
-    setSnapshot(null); setRestored(false)
     setInput(''); setPhase('chat')
     setTerraform(null); setReview(null); setCost(null); setPipeline(null)
     setSteps([
@@ -360,7 +297,7 @@ function GenerateMode() {
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)', letterSpacing: 2 }}>
             {phase === 'chat' ? 'AGENT 0 · CLARIFIER' : phase === 'generating' ? 'RUNNING AGENTS...' : 'COMPLETE ✓'}
-            {snapshot && <span style={{ marginLeft: 8, color: 'var(--accent2)', fontSize: 9, letterSpacing: 1 }}>· 📸 SNAPSHOT</span>}
+
           </div>
           {(chatHistory.length > 0 || phase === 'done') && (
             <button onClick={reset} style={{
@@ -376,25 +313,6 @@ function GenerateMode() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {/* Restored session banner */}
-          {restored && chatHistory.length > 0 && (
-            <div style={{
-              padding: '8px 12px', marginBottom: 12,
-              background: 'rgba(0,136,255,0.08)', border: '1px solid rgba(0,136,255,0.2)',
-              borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-            }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent2)' }}>
-                ⚡ Session restored
-                {snapshot?.estimated_cost && ` · ${snapshot.estimated_cost}`}
-                {snapshot?.cloud && ` · ${snapshot.cloud}`}
-              </span>
-              <button onClick={() => setRestored(false)} style={{
-                background: 'none', border: 'none', color: 'var(--text3)',
-                cursor: 'pointer', fontSize: 12, padding: '0 4px'
-              }}>✕</button>
-            </div>
-          )}
-
           {chatHistory.length === 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text3)', textAlign: 'center' }}>
               <div style={{ fontSize: 36, opacity: 0.4 }}>💬</div>
