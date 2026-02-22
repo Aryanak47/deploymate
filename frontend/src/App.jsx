@@ -188,51 +188,74 @@ function ChatMessage({ role, content, isTyping }) {
   )
 }
 
-// ── Generate Mode ─────────────────────────────────────────────────────────────
-function GenerateMode() {
-  const [chatHistory,  setChatHistory]  = useState([])
-  const [apiHistory,   setApiHistory]   = useState([])
-  const [input,        setInput]        = useState('')
-  const [isThinking,   setIsThinking]   = useState(false)
-  const [phase,        setPhase]        = useState('chat')
-
-  const [steps, setSteps] = useState([
+// ── Empty session factory ─────────────────────────────────────────────────────
+const newSession = () => ({
+  id:          Date.now(),
+  createdAt:   new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  chatHistory: [],
+  apiHistory:  [],
+  phase:       'chat',
+  terraform:   null,
+  review:      null,
+  cost:        null,
+  pipeline:    null,
+  steps: [
     { label: 'Generate .tf infrastructure files', status: 'waiting' },
     { label: 'Review for security issues',        status: 'waiting' },
     { label: 'Estimate monthly costs',            status: 'waiting' },
     { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
-  ])
+  ]
+})
 
-  const [terraform, setTerraform] = useState(null)
-  const [review,    setReview]    = useState(null)
-  const [cost,      setCost]      = useState(null)
-  const [pipeline,  setPipeline]  = useState(null)
+const _initial = newSession() // one shared instance for initial state
 
+// ── Generate Mode ─────────────────────────────────────────────────────────────
+function GenerateMode() {
+  const [sessions,  setSessions]  = useState([_initial])
+  const [activeId,  setActiveId]  = useState(_initial.id)
+  const [input,      setInput]      = useState('')
+  const [isThinking, setIsThinking] = useState(false)
+
+  const session = sessions.find(s => s.id === activeId) || sessions[0]
   const chatEndRef = useRef(null)
   const inputRef   = useRef(null)
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatHistory, isThinking])
+  // Helper to update active session fields
+  const updateSession = (fields) => {
+    setSessions(prev => prev.map(s => s.id === activeId ? { ...s, ...fields } : s))
+  }
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [session?.chatHistory, isThinking])
+
+  const startNewSession = () => {
+    const s = newSession()
+    setSessions(prev => [s, ...prev])
+    setActiveId(s.id)
+    setInput('')
+    setIsThinking(false)
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }
 
   const sendMessage = async () => {
-    if (!input.trim() || isThinking || phase !== 'chat') return
+    if (!input.trim() || isThinking || session?.phase !== 'chat') return
     const userText = input.trim()
     setInput('')
 
-    const newChatHistory = [...chatHistory, { role: 'user', content: userText }]
-    const newApiHistory  = [...apiHistory,  { role: 'user', content: userText }]
-    setChatHistory(newChatHistory)
-    setApiHistory(newApiHistory)
+    const newChatHistory = [...session.chatHistory, { role: 'user', content: userText }]
+    const newApiHistory  = [...session.apiHistory,  { role: 'user', content: userText }]
+    updateSession({ chatHistory: newChatHistory, apiHistory: newApiHistory })
     setIsThinking(true)
 
     try {
       const res = await fetch('/api/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, history: apiHistory })
+        body: JSON.stringify({ message: userText, history: session.apiHistory })
       })
       const { reply, isReady } = await res.json()
-      setChatHistory([...newChatHistory, { role: 'assistant', content: reply }])
-      setApiHistory([...newApiHistory,  { role: 'assistant', content: reply }])
+      const updatedChat = [...newChatHistory, { role: 'assistant', content: reply }]
+      const updatedApi  = [...newApiHistory,  { role: 'assistant', content: reply }]
+      updateSession({ chatHistory: updatedChat, apiHistory: updatedApi })
       setIsThinking(false)
       if (isReady) setTimeout(() => runGenerateFlow(reply), 800)
     } catch (err) {
@@ -242,43 +265,32 @@ function GenerateMode() {
   }
 
   const runGenerateFlow = async (summary) => {
-    setPhase('generating')
-    setSteps([
-      { label: 'Generate .tf infrastructure files', status: 'waiting' },
-      { label: 'Review for security issues',        status: 'waiting' },
-      { label: 'Estimate monthly costs',            status: 'waiting' },
-      { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
-    ])
-    setTerraform(null); setReview(null); setCost(null); setPipeline(null)
+    updateSession({
+      phase: 'generating',
+      terraform: null, review: null, cost: null, pipeline: null,
+      steps: [
+        { label: 'Generate .tf infrastructure files', status: 'waiting' },
+        { label: 'Review for security issues',        status: 'waiting' },
+        { label: 'Estimate monthly costs',            status: 'waiting' },
+        { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
+      ]
+    })
 
     const es = new EventSource(`/api/generate-flow?description=${encodeURIComponent(summary)}`)
 
     es.addEventListener('step', e => {
       const { step, status, label } = JSON.parse(e.data)
-      setSteps(prev => prev.map((s, i) => i === step - 1 ? { ...s, status, label } : s))
+      setSessions(prev => prev.map(s => s.id === activeId
+        ? { ...s, steps: s.steps.map((st, i) => i === step - 1 ? { ...st, status, label } : st) }
+        : s
+      ))
     })
     es.addEventListener('result', e => {
       const { type, content } = JSON.parse(e.data)
-      if (type === 'terraform') setTerraform(content)
-      if (type === 'review')    setReview(content)
-      if (type === 'cost')      setCost(content)
-      if (type === 'pipeline')  setPipeline(content)
+      setSessions(prev => prev.map(s => s.id === activeId ? { ...s, [type]: content } : s))
     })
-    es.addEventListener('done', () => { setPhase('done'); es.close() })
-    es.addEventListener('error', () => { setPhase('chat'); es.close() })
-  }
-
-  const reset = () => {
-    setChatHistory([]); setApiHistory([])
-    setInput(''); setPhase('chat')
-    setTerraform(null); setReview(null); setCost(null); setPipeline(null)
-    setSteps([
-      { label: 'Generate .tf infrastructure files', status: 'waiting' },
-      { label: 'Review for security issues',        status: 'waiting' },
-      { label: 'Estimate monthly costs',            status: 'waiting' },
-      { label: 'Generate .gitlab-ci.yml pipeline',  status: 'waiting' },
-    ])
-    setTimeout(() => inputRef.current?.focus(), 100)
+    es.addEventListener('done', () => { updateSession({ phase: 'done' }); es.close() })
+    es.addEventListener('error', () => { updateSession({ phase: 'chat' }); es.close() })
   }
 
   const panelStyle = {
@@ -286,34 +298,72 @@ function GenerateMode() {
     borderRadius: 10, display: 'flex', flexDirection: 'column', overflow: 'hidden'
   }
 
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 16, height: '100%' }}>
+  // Get title from first user message
+  const sessionTitle = (s) => {
+    const first = s.chatHistory.find(m => m.role === 'user')
+    if (!first) return 'New session'
+    return first.content.length > 28 ? first.content.slice(0, 28) + '...' : first.content
+  }
 
-      {/* Left: Chat */}
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '180px 400px 1fr', gap: 12, height: '100%' }}>
+
+      {/* Sidebar: Session History */}
+      <div style={{ ...panelStyle, gap: 0 }}>
+        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text3)', letterSpacing: 2 }}>SESSIONS</span>
+          <button onClick={startNewSession} style={{
+            background: 'var(--accent)', border: 'none', borderRadius: 4,
+            color: '#000', padding: '3px 8px', cursor: 'pointer',
+            fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700
+          }}>+ NEW</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {sessions.map(s => (
+            <div key={s.id} onClick={() => setActiveId(s.id)} style={{
+              padding: '10px 12px', cursor: 'pointer',
+              borderBottom: '1px solid var(--border)',
+              background: s.id === activeId ? 'rgba(0,255,136,0.05)' : 'transparent',
+              borderLeft: `2px solid ${s.id === activeId ? 'var(--accent)' : 'transparent'}`,
+              transition: 'all 0.15s'
+            }}
+            onMouseEnter={e => { if (s.id !== activeId) e.currentTarget.style.background = 'var(--bg3)' }}
+            onMouseLeave={e => { if (s.id !== activeId) e.currentTarget.style.background = 'transparent' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: s.id === activeId ? 'var(--accent)' : 'var(--text2)', marginBottom: 3, wordBreak: 'break-word', lineHeight: 1.4 }}>
+                {sessionTitle(s)}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text3)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span>{s.createdAt}</span>
+                {s.phase === 'done' && <span style={{ color: 'var(--accent)' }}>✓ done</span>}
+                {s.phase === 'generating' && <span style={{ color: 'var(--accent2)' }}>◌ running</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Middle: Chat */}
       <div style={panelStyle}>
         <div style={{
           padding: '12px 20px', borderBottom: '1px solid var(--border)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text3)', letterSpacing: 2 }}>
-            {phase === 'chat' ? 'AGENT 0 · CLARIFIER' : phase === 'generating' ? 'RUNNING AGENTS...' : 'COMPLETE ✓'}
-
+            {session?.phase === 'chat' ? 'AGENT 0 · CLARIFIER' : session?.phase === 'generating' ? 'RUNNING AGENTS...' : 'COMPLETE ✓'}
           </div>
-          {(chatHistory.length > 0 || phase === 'done') && (
-            <button onClick={reset} style={{
-              background: 'none', border: '1px solid var(--border)', borderRadius: 6,
-              color: 'var(--text3)', padding: '4px 10px', cursor: 'pointer',
-              fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1, transition: 'all 0.15s'
-            }}
-            onMouseEnter={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text3)' }}>
-              ↺ NEW
-            </button>
-          )}
+          <button onClick={startNewSession} style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+            color: 'var(--text3)', padding: '4px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1, transition: 'all 0.15s'
+          }}
+          onMouseEnter={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.color = 'var(--accent)' }}
+          onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text3)' }}>
+            + NEW
+          </button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {chatHistory.length === 0 && (
+          {session?.chatHistory.length === 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text3)', textAlign: 'center' }}>
               <div style={{ fontSize: 36, opacity: 0.4 }}>💬</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 2 }}>
@@ -327,16 +377,16 @@ function GenerateMode() {
             </div>
           )}
 
-          {chatHistory.map((msg, i) => <ChatMessage key={i} role={msg.role} content={msg.content} />)}
-          {isThinking && <ChatMessage role="assistant" content="" isTyping />}
+          {session?.chatHistory.map((msg, i) => <ChatMessage key={i} role={msg.role} content={msg.content} />)}
+          {isThinking && activeId === session?.id && <ChatMessage role="assistant" content="" isTyping />}
 
-          {phase === 'generating' && (
+          {session?.phase === 'generating' && (
             <div style={{ marginTop: 8 }}>
-              <StepIndicator steps={steps} />
+              <StepIndicator steps={session.steps} />
             </div>
           )}
 
-          {phase === 'done' && (
+          {session?.phase === 'done' && (
             <div style={{ padding: '12px 16px', background: 'rgba(0,255,136,0.05)', border: '1px solid rgba(0,255,136,0.2)', borderRadius: 8, marginTop: 8 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent)' }}>
                 ✅ All done! Check the results →
@@ -355,29 +405,29 @@ function GenerateMode() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder={
-                phase === 'chat'
-                  ? chatHistory.length === 0 ? 'Describe your infrastructure...' : 'Answer above...'
-                  : phase === 'generating' ? 'Agents running...'
-                  : 'Done! Click ↺ NEW to start over'
+                session?.phase === 'chat'
+                  ? session?.chatHistory.length === 0 ? 'Describe your infrastructure...' : 'Answer above...'
+                  : session?.phase === 'generating' ? 'Agents running...'
+                  : 'Done! Start a new session ↑'
               }
-              disabled={phase !== 'chat' || isThinking}
+              disabled={session?.phase !== 'chat' || isThinking}
               style={{
                 flex: 1, background: 'var(--bg3)', border: '1px solid var(--border)',
                 borderRadius: 8, padding: '10px 14px', color: 'var(--text)',
                 fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none',
-                opacity: phase !== 'chat' ? 0.5 : 1, transition: 'border-color 0.15s'
+                opacity: session?.phase !== 'chat' ? 0.5 : 1, transition: 'border-color 0.15s'
               }}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
               autoFocus
             />
-            <button onClick={sendMessage} disabled={phase !== 'chat' || isThinking || !input.trim()} style={{
+            <button onClick={sendMessage} disabled={session?.phase !== 'chat' || isThinking || !input.trim()} style={{
               padding: '10px 16px',
-              background: phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
-              border: `1px solid ${phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
+              background: session?.phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--bg3)',
+              border: `1px solid ${session?.phase === 'chat' && input.trim() ? 'var(--accent)' : 'var(--border)'}`,
               borderRadius: 8,
-              color: phase === 'chat' && input.trim() ? '#000' : 'var(--text3)',
-              cursor: phase === 'chat' && input.trim() ? 'pointer' : 'not-allowed',
+              color: session?.phase === 'chat' && input.trim() ? '#000' : 'var(--text3)',
+              cursor: session?.phase === 'chat' && input.trim() ? 'pointer' : 'not-allowed',
               fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, transition: 'all 0.15s'
             }}>›</button>
           </div>
@@ -389,8 +439,8 @@ function GenerateMode() {
 
       {/* Right: Results */}
       <div style={panelStyle}>
-        {terraform || review || cost || pipeline
-          ? <ResultPanel terraform={terraform} review={review} cost={cost} pipeline={pipeline} />
+        {session?.terraform || session?.review || session?.cost || session?.pipeline
+          ? <ResultPanel terraform={session.terraform} review={session.review} cost={session.cost} pipeline={session.pipeline} />
           : (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: 'var(--text3)' }}>
               <div style={{ fontSize: 48, opacity: 0.2 }}>🏗️</div>
