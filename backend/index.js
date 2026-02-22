@@ -85,25 +85,11 @@ app.post('/api/clarify', async (req, res) => {
 
   try {
     const reply = await runAgent(SKILL_CLARIFY, message, history || [])
-    // Detect readiness with multiple signals — Claude may word it differently each time
-    const readySignals = [
-      'generating your infrastructure now',
-      'generating infrastructure now',
-      'generating your infrastructure',
-      'generate your infrastructure',
-      'will now generate',
-      'ready to generate',
-      'proceeding to generate',
-      'creating your infrastructure',
-      'let me generate',
-      "i'll generate",
-      "i'll now generate",
-      'starting generation',
-      'infrastructure now'
-    ]
-    const replyLower = reply.toLowerCase()
-    const isReady = readySignals.some(signal => replyLower.includes(signal))
-    res.json({ reply, isReady })
+    // Detect readiness — only trigger when Agent 0 explicitly says it's DONE asking
+    // Use a special sentinel phrase in the skill prompt instead of fuzzy matching
+    const isReady = reply.includes('%%READY%%')
+    const cleanReply = reply.replace('%%READY%%', '').trim()
+    res.json({ reply: cleanReply, isReady })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err.message })
