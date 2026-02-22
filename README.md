@@ -1,33 +1,41 @@
 # 🚀 DeployMate — IaC Agent
 
-> Describe your app in plain English. Get infrastructure, security review, and a CI/CD pipeline — automatically.
->
-> <img width="1870" height="914" alt="image" src="https://github.com/user-attachments/assets/d779ec7c-3659-451a-b599-444b31d463ff" />
+> Describe your app in plain English. Get infrastructure, security review, cost estimate, and a CI/CD pipeline — automatically.
 
+<img width="1870" height="914" alt="image" src="https://github.com/user-attachments/assets/d779ec7c-3659-451a-b599-444b31d463ff" />
 <img width="1820" height="886" alt="image" src="https://github.com/user-attachments/assets/46ae3a5e-cf4d-4b30-8958-50c094f3fe0f" />
-<img width="1851" height="903" alt="image" src="https://github.com/user-attachments/assets/fc62ae54-86b9-4e24-ba73-613f17807957" />
-
-
-
-
 
 ---
 
 ## How It Works
 
-DeployMate runs a **3-agent flow** powered by Claude:
+DeployMate runs a **5-agent flow** powered by Claude:
 
 ```
 User describes infrastructure
          ↓
-[Agent 1] generate_infrastructure  →  .tf files
+[Agent 0] clarify_requirements     →  asks questions, collects cloud/db/scale details
+         ↓
+[Agent 1] generate_infrastructure  →  .tf files (OpenTofu)
          ↓
 [Agent 2] review_security          →  security report + fixes
          ↓
-[Agent 3] generate_pipeline        →  .gitlab-ci.yml
+[Agent 3] estimate_cost            →  monthly cost breakdown
+         ↓
+[Agent 4] generate_pipeline        →  .gitlab-ci.yml
 ```
 
 Each agent has its own focused skill file — a system prompt that makes Claude an expert at that specific task.
+
+---
+
+## Features
+
+- **Agent 0 Clarifier** — asks only the questions needed (cloud, database, scale) before generating anything
+- **Session History** — run multiple deployments, switch between them, old sessions stay intact
+- **Download ZIP** — download all generated files (`main.tf`, `.gitlab-ci.yml`, security report, cost estimate) in one click
+- **Review Mode** — paste existing `.tf` files and get a security review with follow-up chat
+- **Real-time streaming** — watch agents run step by step via SSE
 
 ---
 
@@ -38,7 +46,7 @@ Each agent has its own focused skill file — a system prompt that makes Claude 
 ```bash
 cd backend
 
-# Edit .env and add your real API key:
+# Add your Anthropic API key to .env:
 # ANTHROPIC_API_KEY=sk-ant-...
 
 npm install
@@ -62,18 +70,20 @@ Open **http://localhost:5173**
 ```
 deploymate/
 ├── backend/
-│   ├── index.js                        # Express server + 3-agent flow via SSE
+│   ├── index.js                        # Express server + 5-agent flow via SSE
 │   ├── skills/
-│   │   ├── generate_infrastructure.md  # Agent 1 system prompt
-│   │   ├── review_security.md          # Agent 2 system prompt
-│   │   └── generate_pipeline.md        # Agent 3 system prompt
+│   │   ├── clarify_requirements.md     # Agent 0 — collects requirements
+│   │   ├── generate_infrastructure.md  # Agent 1 — generates .tf files
+│   │   ├── review_security.md          # Agent 2 — security review
+│   │   ├── estimate_cost.md            # Agent 3 — cost estimation
+│   │   └── generate_pipeline.md        # Agent 4 — GitLab CI pipeline
 │   └── .env                            # Your API key goes here
 │
 └── frontend/
     ├── index.html
     └── src/
         ├── main.jsx
-        ├── App.jsx                     # Full UI — two modes
+        ├── App.jsx                     # Full UI — sessions, results, ZIP download
         └── index.css
 ```
 
@@ -81,10 +91,6 @@ deploymate/
 
 ## Two Modes
 
-**⚙️ Generate Flow** — Type what you want → 3 agents run in sequence → get .tf files, security report, and pipeline
+**⚙️ Generate Flow** — Describe your app → Agent 0 asks clarifying questions → 4 agents run in sequence → get `.tf` files, security report, cost estimate, and GitLab pipeline. Supports multiple sessions side by side.
 
-**🔍 Review .tf** — Paste existing OpenTofu code → security agent reviews it → follow-up chat
-
----
-
-
+**🔍 Review .tf** — Paste existing OpenTofu/Terraform code → security agent reviews it → follow-up chat to ask questions or get fixes.
