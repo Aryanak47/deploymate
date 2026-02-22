@@ -14,7 +14,7 @@
 
 ## How It Works
 
-DeployMate runs a **5-agent flow** powered by Claude:
+DeployMate runs a **5-agent flow**:
 
 ```
 User describes infrastructure
