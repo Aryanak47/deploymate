@@ -10,7 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Load all 3 skills
+// Load all skills
+const SKILL_CLARIFY  = fs.readFileSync(path.join(__dirname, 'skills/clarify_requirements.md'), 'utf-8')
 const SKILL_GENERATE = fs.readFileSync(path.join(__dirname, 'skills/generate_infrastructure.md'), 'utf-8')
 const SKILL_REVIEW   = fs.readFileSync(path.join(__dirname, 'skills/review_security.md'), 'utf-8')
 const SKILL_PIPELINE = fs.readFileSync(path.join(__dirname, 'skills/generate_pipeline.md'), 'utf-8')
@@ -18,19 +19,40 @@ const SKILL_PIPELINE = fs.readFileSync(path.join(__dirname, 'skills/generate_pip
 app.use(cors())
 app.use(express.json())
 
-// ── Helper: call Claude with a skill ─────────────────────────────────────────
-async function runAgent(skill, userMessage) {
+// ── Helper: single Claude call ────────────────────────────────────────────────
+async function runAgent(skill, userMessage, history = []) {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 4096,
     system: skill,
-    messages: [{ role: 'user', content: userMessage }]
+    messages: [...history, { role: 'user', content: userMessage }]
   })
   return response.content[0].text
 }
 
-// ── Route 1: Full 3-agent flow (Generate → Review → Pipeline) ────────────────
-// Uses Server-Sent Events to stream progress to the frontend in real time
+// ── Route 1: Clarify (Agent 0) ────────────────────────────────────────────────
+// First message always goes here — agent decides if it needs to ask questions
+// or if description is already detailed enough to proceed
+app.post('/api/clarify', async (req, res) => {
+  const { message, history } = req.body
+  if (!message) return res.status(400).json({ error: 'message is required' })
+
+  try {
+    const reply = await runAgent(SKILL_CLARIFY, message, history || [])
+
+    // Detect if agent has enough info and is ready to generate
+    // Agent signals readiness by including "Generating your infrastructure now..."
+    const isReady = reply.includes('Generating your infrastructure now')
+
+    res.json({ reply, isReady })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Route 2: Full 3-agent flow (Generate → Review → Pipeline) ────────────────
+// Called after clarification is complete, receives the full conversation summary
 app.get('/api/generate-flow', async (req, res) => {
   const description = req.query.description
   if (!description) return res.status(400).json({ error: 'description is required' })
@@ -88,7 +110,7 @@ app.get('/api/generate-flow', async (req, res) => {
   }
 })
 
-// ── Route 2: Review only (user pastes existing .tf files) ────────────────────
+// ── Route 3: Review only (user pastes existing .tf files) ────────────────────
 app.post('/api/review', async (req, res) => {
   const { tfCode } = req.body
   if (!tfCode) return res.status(400).json({ error: 'tfCode is required' })
@@ -105,10 +127,10 @@ app.post('/api/review', async (req, res) => {
   }
 })
 
-// ── Route 3: Chat (follow-up questions in review mode) ───────────────────────
+// ── Route 4: Follow-up chat in review mode ───────────────────────────────────
 app.post('/api/chat', async (req, res) => {
   const { message, history, mode } = req.body
-  const skill = mode === 'review' ? SKILL_REVIEW : SKILL_GENERATE
+  const skill = mode === 'review' ? SKILL_REVIEW : SKILL_CLARIFY
 
   try {
     const response = await client.messages.create({
