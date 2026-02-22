@@ -2,7 +2,6 @@
 
 > Describe your app in plain English. Get infrastructure, security review, and a CI/CD pipeline — automatically.
 
-Built for the **GitLab × Anthropic Hackathon** using Claude Sonnet 4.6.
 
 ---
 
