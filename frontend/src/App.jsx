@@ -305,11 +305,6 @@ export default function App() {
             }}>{m.label}</button>
           ))}
         </div>
-
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>
-          <span style={{ color: 'var(--accent)', animation: 'pulse-accent 2s ease infinite' }}>●</span>
-          {' '}CLAUDE SONNET 4.6
-        </div>
       </header>
 
       {/* ── Body ── */}
